@@ -124,6 +124,22 @@ def add_to_google_sheet(data):
     ]
     worksheet.append_row(row)
 
+def format_summary(data):
+    tur_emoji = '🟢' if data.get('type') == 'Kirim' else '🔴'
+    # Use the timestamp from the data if available, otherwise generate a new one
+    dt = data.get('dt', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    return (
+        f"<b>Natija:</b>\n"
+        f"<b>Tur:</b> {tur_emoji} {data.get('type', '-')}\n"
+        f"<b>Nomi:</b> {data.get('nomi', '-')}\n"
+        f"<b>Kotegoriya:</b> {data.get('category', '-')}\n"
+        f"<b>Loyiha:</b> {data.get('loyiha', '-')}\n"
+        f"<b>Summa:</b> {data.get('amount', '-')}\n"
+        f"<b>To'lov turi:</b> {data.get('pay_type', '-')}\n"
+        f"<b>Izoh:</b> {data.get('comment', '-')}\n"
+        f"<b>Vaqt:</b> {dt}"
+    )
+
 # --- Админы ---
 ADMINS = [5657091547, 5048593195]  # Здесь можно добавить id других админов через запятую
 
@@ -394,19 +410,13 @@ async def process_pay_type(call: types.CallbackQuery, state: FSMContext):
 async def skip_comment_btn(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(comment='-')
     data = await state.get_data()
-    dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # Формат с секундами для Google Sheets
-    tur_emoji = '🟢' if data['type'] == 'Kirim' else '🔴'
-    text = (
-        f"<b>Natija:</b>\n"
-        f"<b>Tur:</b> {tur_emoji} {data['type']}\n"
-        f"<b>Kotegoriya:</b> {data['category']}\n"
-        f"<b>Summa:</b> {data['amount']}\n"
-        f"<b>To'lov turi:</b> {data['pay_type']}\n"
-        f"<b>Izoh:</b> -\n"
-        f"<b>Vaqt:</b> {dt}"
-    )
+    # Set and save the final timestamp
+    data['dt'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    await state.update_data(dt=data['dt'])
+    
+    text = format_summary(data)
+    
     await call.message.answer(text, reply_markup=confirm_kb)
-    await state.update_data(dt=dt)
     await state.set_state('confirm')
     await call.answer()
 
@@ -415,19 +425,13 @@ async def skip_comment_btn(call: types.CallbackQuery, state: FSMContext):
 async def process_comment(msg: types.Message, state: FSMContext):
     await state.update_data(comment=msg.text)
     data = await state.get_data()
-    dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # Формат с секундами для Google Sheets
-    tur_emoji = '🟢' if data['type'] == 'Kirim' else '🔴'
-    text = (
-        f"<b>Natija:</b>\n"
-        f"<b>Tur:</b> {tur_emoji} {data['type']}\n"
-        f"<b>Kotegoriya:</b> {data['category']}\n"
-        f"<b>Summa:</b> {data['amount']}\n"
-        f"<b>To'lov turi:</b> {data['pay_type']}\n"
-        f"<b>Izoh:</b> {data['comment']}\n"
-        f"<b>Vaqt:</b> {dt}"
-    )
+    # Set and save the final timestamp
+    data['dt'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    await state.update_data(dt=data['dt'])
+    
+    text = format_summary(data)
+
     await msg.answer(text, reply_markup=confirm_kb)
-    await state.update_data(dt=dt)
     await state.set_state('confirm')
 
 # Обработка кнопок Да/Нет
@@ -443,13 +447,25 @@ async def process_confirm(call: types.CallbackQuery, state: FSMContext):
         else:
             date_str = dt.strftime('%-m/%-d/%Y')
         time_str = dt.strftime('%H:%M')
-        data['dt'] = date_str
+        data['dt_for_sheet'] = date_str
         data['vaqt'] = time_str
         # Гарантируем, что user_id всегда есть
         data['user_id'] = call.from_user.id
         try:
             add_to_google_sheet(data)
             await call.message.answer('✅ Данные успешно отправлены в Google Sheets!')
+
+            # Уведомление для админов
+            user_name = get_user_name(call.from_user.id) or call.from_user.full_name
+            summary_text = format_summary(data)
+            admin_notification_text = f"Foydalanuvchi <b>{user_name}</b> tomonidan kiritilgan yangi ma'lumot:\n\n{summary_text}"
+            
+            for admin_id in ADMINS:
+                try:
+                    await bot.send_message(admin_id, admin_notification_text)
+                except Exception as e:
+                    logging.error(f"Could not send notification to admin {admin_id}: {e}")
+
         except Exception as e:
             await call.message.answer(f'⚠️ Ошибка при отправке в Google Sheets: {e}')
         await state.finish()
@@ -468,11 +484,12 @@ async def process_confirm(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
 
 # --- Команды для админа ---
-@dp.message_handler(commands=['add_tolov'])
+@dp.message_handler(commands=['add_tolov'], state='*')
 async def add_paytype_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     await msg.answer('Yangi To‘lov turi nomini yuboring:')
     await state.set_state('add_paytype')
 
@@ -491,11 +508,12 @@ async def add_paytype_save(msg: types.Message, state: FSMContext):
     conn.close()
     await state.finish()
 
-@dp.message_handler(commands=['add_category'])
+@dp.message_handler(commands=['add_category'], state='*')
 async def add_category_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     await msg.answer('Yangi kategoriya nomini yuboring:')
     await state.set_state('add_category')
 
@@ -515,11 +533,12 @@ async def add_category_save(msg: types.Message, state: FSMContext):
     await state.finish()
 
 # --- Удаление и изменение To'lov turi ---
-@dp.message_handler(commands=['del_tolov'])
+@dp.message_handler(commands=['del_tolov'], state='*')
 async def del_tolov_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     kb = InlineKeyboardMarkup(row_width=1)
     for name in get_pay_types():
         kb.add(InlineKeyboardButton(f'❌ {name}', callback_data=f'del_tolov_{name}'))
@@ -539,11 +558,12 @@ async def del_tolov_cb(call: types.CallbackQuery):
     await call.message.edit_text(f'❌ To‘lov turi o‘chirildi: {name}')
     await call.answer()
 
-@dp.message_handler(commands=['edit_tolov'])
+@dp.message_handler(commands=['edit_tolov'], state='*')
 async def edit_tolov_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     kb = InlineKeyboardMarkup(row_width=1)
     for name in get_pay_types():
         kb.add(InlineKeyboardButton(f'✏️ {name}', callback_data=f'edit_tolov_{name}'))
@@ -574,11 +594,12 @@ async def edit_tolov_save(msg: types.Message, state: FSMContext):
     await state.finish()
 
 # --- Удаление и изменение Kotegoriyalar ---
-@dp.message_handler(commands=['del_category'])
+@dp.message_handler(commands=['del_category'], state='*')
 async def del_category_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     kb = InlineKeyboardMarkup(row_width=1)
     for name in get_categories():
         kb.add(InlineKeyboardButton(f'❌ {name}', callback_data=f'del_category_{name}'))
@@ -598,11 +619,12 @@ async def del_category_cb(call: types.CallbackQuery):
     await call.message.edit_text(f'❌ Kategoriya o‘chirildi: {name}')
     await call.answer()
 
-@dp.message_handler(commands=['edit_category'])
+@dp.message_handler(commands=['edit_category'], state='*')
 async def edit_category_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     kb = InlineKeyboardMarkup(row_width=1)
     for name in get_categories():
         kb.add(InlineKeyboardButton(f'✏️ {name}', callback_data=f'edit_category_{name}'))
@@ -632,11 +654,12 @@ async def edit_category_save(msg: types.Message, state: FSMContext):
     await msg.answer(f'✏️ Kategoriya o‘zgartirildi: {old_name} → {new_name}')
     await state.finish()
 
-@dp.message_handler(commands=['userslist'])
-async def users_list_cmd(msg: types.Message):
+@dp.message_handler(commands=['userslist'], state='*')
+async def users_list_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     conn = get_db_conn()
     c = conn.cursor()
     c.execute("SELECT user_id, name, phone, reg_date FROM users WHERE status='approved'")
@@ -650,11 +673,12 @@ async def users_list_cmd(msg: types.Message):
         text += f"\n{i}. <b>{name}</b>\nID: <code>{user_id}</code>\nTelefon: <code>{phone}</code>\nRo‘yxatdan o‘tgan: {reg_date}\n"
     await msg.answer(text)
 
-@dp.message_handler(commands=['block_user'])
+@dp.message_handler(commands=['block_user'], state='*')
 async def block_user_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     conn = get_db_conn()
     c = conn.cursor()
     c.execute("SELECT user_id, name FROM users WHERE status='approved'")
@@ -682,11 +706,12 @@ async def block_user_cb(call: types.CallbackQuery):
     await call.message.edit_text(f'🚫 Foydalanuvchi bloklandi: {user_id}')
     await call.answer()
 
-@dp.message_handler(commands=['approve_user'])
+@dp.message_handler(commands=['approve_user'], state='*')
 async def approve_user_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
         await msg.answer('Faqat admin uchun!')
         return
+    await state.finish()  # Сброс состояния
     conn = get_db_conn()
     c = conn.cursor()
     c.execute("SELECT user_id, name FROM users WHERE status='denied'")
