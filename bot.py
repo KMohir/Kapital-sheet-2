@@ -189,7 +189,8 @@ def init_db():
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE
+        name TEXT UNIQUE,
+        emoji TEXT
     )''')
     # Заполняем дефолтные значения, если таблицы пусты
     c.execute('SELECT COUNT(*) FROM pay_types')
@@ -199,7 +200,7 @@ def init_db():
     c.execute('SELECT COUNT(*) FROM categories')
     if c.fetchone()[0] == 0:
         for name in ["🟥 Doimiy Xarajat", "🟩 Oʻzgaruvchan Xarajat", "🟪 Qarz", "⚪ Avtoprom", "🟩 Divident", "🟪 Soliq", "🟦 Ish Xaqi"]:
-            c.execute('INSERT INTO categories (name) VALUES (%s)', (name,))
+            c.execute('INSERT INTO categories (name, emoji) VALUES (%s, %s)', (name, "")) # Добавляем пустой emoji по умолчанию
     conn.commit()
     conn.close()
 
@@ -256,8 +257,8 @@ def get_pay_types():
 def get_categories():
     conn = get_db_conn()
     c = conn.cursor()
-    c.execute('SELECT name FROM categories')
-    result = [row[0] for row in c.fetchall()]
+    c.execute('SELECT name, emoji FROM categories')
+    result = [(row[1] or '', row[0]) for row in c.fetchall()]
     conn.close()
     return result
 
@@ -536,16 +537,23 @@ async def add_category_cmd(msg: types.Message, state: FSMContext):
     await msg.answer('Yangi kategoriya nomini yuboring:')
     await state.set_state('add_category')
 
+def split_emoji_and_text(text):
+    match = re.match(r'^([^ -\w\s]+)?\s*(.*)', text)
+    if match:
+        emoji = match.group(1) or ''
+        name = match.group(2)
+        return emoji, name
+    return '', text
+
 @dp.message_handler(state='add_category', content_types=types.ContentTypes.TEXT)
 async def add_category_save(msg: types.Message, state: FSMContext):
-    # Удаляем эмодзи из названия категории
-    name = clean_emoji(msg.text.strip())
+    emoji, name = split_emoji_and_text(msg.text.strip())
     conn = get_db_conn()
     c = conn.cursor()
     try:
-        c.execute('INSERT INTO categories (name) VALUES (%s)', (name,))
+        c.execute('INSERT INTO categories (name, emoji) VALUES (%s, %s)', (name, emoji))
         conn.commit()
-        await msg.answer(f'✅ Yangi kategoriya qo‘shildi: {name}')
+        await msg.answer(f'✅ Yangi kategoriya qo‘shildi: {emoji} {name}'.strip())
     except IntegrityError:
         await msg.answer('❗️ Bu nom allaqachon mavjud.')
         conn.rollback()
