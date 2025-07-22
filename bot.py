@@ -54,11 +54,28 @@ categories = [
     ("🟦 Ish Xaqi", "cat_ishhaqi")
 ]
 
+# Словарь соответствий: категория -> эмодзи
+category_emojis = {
+    "Qurilish materiallari": "🟩",
+    "Doimiy Xarajat": "🟥",
+    "Qarz": "🟪",
+    "Divident": "🟩",
+    "Soliq": "🟪",
+    "Ish Xaqi": "🟦",
+    # Добавьте другие категории и эмодзи по мере необходимости
+}
+
+def get_category_with_emoji(category_name):
+    emoji = category_emojis.get(category_name, "")
+    return f"{emoji} {category_name}".strip()
+
 def get_categories_kb():
     kb = InlineKeyboardMarkup(row_width=2)
     for name in get_categories():
         cb = f"cat_{name}"
-        kb.add(InlineKeyboardButton(name, callback_data=cb))
+        # Показываем эмодзи в меню
+        btn_text = get_category_with_emoji(name)
+        kb.add(InlineKeyboardButton(btn_text, callback_data=cb))
     return kb
 
 # Тип оплаты
@@ -127,13 +144,14 @@ def add_to_google_sheet(data):
 
 def format_summary(data):
     tur_emoji = '🟢' if data.get('type') == 'Kirim' else '🔴'
-    # Use the timestamp from the data if available, otherwise generate a new one
     dt = data.get('dt', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    # Показываем категорию с эмодзи
+    category_with_emoji = get_category_with_emoji(data.get('category', '-'))
     return (
         f"<b>Natija:</b>\n"
         f"<b>Tur:</b> {tur_emoji} {data.get('type', '-')}\n"
         f"<b>Nomi:</b> {data.get('nomi', '-')}\n"
-        f"<b>Kotegoriya:</b> {data.get('category', '-')}\n"
+        f"<b>Kotegoriya:</b> {category_with_emoji}\n"
         f"<b>Loyiha:</b> {data.get('loyiha', '-')}\n"
         f"<b>Summa:</b> {data.get('amount', '-')}\n"
         f"<b>To'lov turi:</b> {data.get('pay_type', '-')}\n"
