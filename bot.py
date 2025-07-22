@@ -519,7 +519,8 @@ async def add_category_cmd(msg: types.Message, state: FSMContext):
 
 @dp.message_handler(state='add_category', content_types=types.ContentTypes.TEXT)
 async def add_category_save(msg: types.Message, state: FSMContext):
-    name = msg.text.strip()
+    # Удаляем эмодзи из названия категории
+    name = clean_emoji(msg.text.strip())
     conn = get_db_conn()
     c = conn.cursor()
     try:
