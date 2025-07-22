@@ -14,6 +14,7 @@ import platform
 import sqlite3
 import psycopg2
 from psycopg2 import sql, IntegrityError
+import re
 
 # Загрузка переменных окружения
 env = Env()
@@ -92,8 +93,8 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 CREDENTIALS_FILE = 'credentials.json'
 
 def clean_emoji(text):
-    # Удаляет эмодзи (цветные квадраты/кружки) в начале строки
-    return text.split(' ', 1)[-1] if ' ' in text else text
+    # Удаляет только эмодзи/спецсимволы в начале строки, остальной текст не трогает
+    return re.sub(r'^[^\w\s]+', '', text).strip()
 
 def add_to_google_sheet(data):
     creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
