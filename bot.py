@@ -339,7 +339,7 @@ async def start(msg: types.Message, state: FSMContext):
 async def process_type(call: types.CallbackQuery, state: FSMContext):
     t = 'Kirim' if call.data == 'type_kirim' else 'Ciqim'
     await state.update_data(type=t)
-    await call.message.edit_text("<b>Qayerga sarflandi yoki qayerdan daromad keldi?</b>")
+    await call.message.edit_text("<b>Xarajat yoki daromad nomini yozing</b>")
     await Form.nomi.set()
     await call.answer()
 
