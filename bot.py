@@ -29,9 +29,9 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 # Состояния
 class Form(StatesGroup):
     type = State()  # Kirim/Ciqim
-    nomi = State()  # Сразу после типа
     category = State()
     loyiha = State()  # Новый шаг
+    currency = State()  # Выбор валюты
     amount = State()
     pay_type = State()
     comment = State()
@@ -114,45 +114,68 @@ def clean_emoji(text):
     return re.sub(r'^[^\w\s]+', '', text).strip()
 
 def add_to_google_sheet(data):
-    creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(SHEET_ID)
-    worksheet = sh.worksheet(SHEET_NAME)
-    # Jadval ustunlari: Kun, Summa, Nomi, Kirim-Chiqim, To'lov turi, Kategoriyalar, Izoh, Vaqt
-    from datetime import datetime
-    now = datetime.now()
-    if platform.system() == 'Windows':
-        date_str = now.strftime('%m/%d/%Y')
-    else:
-        date_str = now.strftime('%-m/%-d/%Y')
-    time_str = now.strftime('%H:%M')
-    user_name = get_user_name(data.get('user_id', data.get('user_id', '')))
-    row = [
-        date_str,      # Kun
-        time_str,      # Vaqt
-        data.get('amount', ''),           # Summa
-        data.get('nomi', ''),             # Nomi
-        clean_emoji(data.get('type', '')), # Kirim-Chiqim
-        data.get('pay_type', ''),         # To'lov turi
-        clean_emoji(data.get('category', '')), # Kategoriyalar
-        data.get('loyiha', ''),           # Loyihalar
-        data.get('comment', ''),          # Izoh
-        '',                               # Oylik ko'rsatkich (если не используется)
-        user_name                         # User (последний столбец)
-    ]
-    worksheet.append_row(row)
+    print("🚨🚨🚨 ФУНКЦИЯ add_to_google_sheet ВЫЗВАНА! 🚨🚨🚨")
+    print(f"🚨🚨🚨 Данные: {data} 🚨🚨🚨")
+    try:
+        creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(SHEET_ID)
+        worksheet = sh.worksheet(SHEET_NAME)
+        # Jadval ustunlari: Kun, Summa, Nomi, Kirim-Chiqim, To'lov turi, Kategoriyalar, Izoh, Vaqt
+        from datetime import datetime
+        now = datetime.now()
+        # Формат даты: 7/30/2025
+        if platform.system() == 'Windows':
+            date_str = now.strftime('%-m/%-d/%Y')  # Убираем ведущие нули
+        else:
+            date_str = now.strftime('%-m/%-d/%Y')  # Убираем ведущие нули
+        time_str = now.strftime('%H:%M')
+        user_name = get_user_name(data.get('user_id', data.get('user_id', '')))
+        print(f"DEBUG: user_id = {data.get('user_id')}, user_name = '{user_name}'")
+        debug_users_table()  # Показываем содержимое базы данных
+        # Определяем, куда записать сумму в зависимости от выбранной валюты
+        currency = data.get('currency', 'Sum')
+        dollar_amount = ''
+        sum_amount = ''
+        
+        if currency == 'Dollar':
+            dollar_amount = data.get('amount', '')
+        else:
+            sum_amount = data.get('amount', '')
+        
+        row = [
+            date_str,      # Kun (A) - дата
+            time_str,      # Vaqt (B) - время
+            dollar_amount,                    # $ (C) - доллары
+            sum_amount,                       # Summa (D) - суммы
+            clean_emoji(data.get('type', '')), # Kirim-Chiqim (E)
+            data.get('pay_type', ''),         # To'lov turi (F)
+            clean_emoji(data.get('category', '')), # Kotegoriyalar (G)
+            data.get('loyiha', ''),           # Loyihalar (H)
+            data.get('comment', ''),          # Izoh (I)
+            '',                               # Oylik ko'rsatkich (J) - пусто
+            user_name                         # User (K) - имя пользователя
+        ]
+        print(f"DEBUG: Row data: {row}")
+        worksheet.append_row(row)
+        print(f"✅ Данные успешно записаны в Google Sheets")
+    except Exception as e:
+        print(f"❌ Ошибка при записи в Google Sheets: {e}")
+        # Можно добавить логирование ошибки
 
 def format_summary(data):
     tur_emoji = '🟢' if data.get('type') == 'Kirim' else '🔴'
     dt = data.get('dt', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     # Показываем категорию с эмодзи
     category_with_emoji = get_category_with_emoji(data.get('category', '-'))
+    currency = data.get('currency', 'Sum')
+    currency_symbol = '💵' if currency == 'Dollar' else '💸'
     return (
         f"<b>Natija:</b>\n"
         f"<b>Tur:</b> {tur_emoji} {data.get('type', '-')}\n"
-        f"<b>Nomi:</b> {data.get('nomi', '-')}\n"
         f"<b>Kotegoriya:</b> {category_with_emoji}\n"
         f"<b>Loyiha:</b> {data.get('loyiha', '-')}\n"
+        f"<b>Valyuta:</b> {currency_symbol} {currency}\n"
         f"<b>Summa:</b> {data.get('amount', '-')}\n"
         f"<b>To'lov turi:</b> {data.get('pay_type', '-')}\n"
         f"<b>Izoh:</b> {data.get('comment', '-')}\n"
@@ -218,13 +241,19 @@ def get_user_status(user_id):
 # --- Регистрация пользователя ---
 def register_user(user_id, name, phone):
     from datetime import datetime
+    print(f"DEBUG: register_user called with user_id={user_id}, name='{name}', phone='{phone}'")
     conn = get_db_conn()
     c = conn.cursor()
     try:
         c.execute('INSERT INTO users (user_id, name, phone, status, reg_date) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (user_id) DO NOTHING',
                   (user_id, name, phone, 'pending', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         conn.commit()
+        print(f"DEBUG: User registered successfully in database")
     except IntegrityError:
+        print(f"DEBUG: User already exists in database")
+        conn.rollback()
+    except Exception as e:
+        print(f"DEBUG: Error registering user: {e}")
         conn.rollback()
     conn.close()
 
@@ -236,14 +265,31 @@ def update_user_status(user_id, status):
     conn.commit()
     conn.close()
 
+# --- Проверка содержимого базы данных ---
+def debug_users_table():
+    print("DEBUG: Checking users table contents:")
+    conn = get_db_conn()
+    c = conn.cursor()
+    try:
+        c.execute('SELECT user_id, name, phone, status, reg_date FROM users ORDER BY id DESC LIMIT 5')
+        rows = c.fetchall()
+        for row in rows:
+            print(f"  User: ID={row[0]}, Name='{row[1]}', Phone='{row[2]}', Status='{row[3]}', Date='{row[4]}'")
+    except Exception as e:
+        print(f"DEBUG: Error reading users table: {e}")
+    conn.close()
+
 # --- Получение имени пользователя для Google Sheets ---
 def get_user_name(user_id):
+    print(f"DEBUG: get_user_name called with user_id = {user_id}")
     conn = get_db_conn()
     c = conn.cursor()
     c.execute('SELECT name FROM users WHERE user_id=%s', (user_id,))
     row = c.fetchone()
     conn.close()
-    return row[0] if row else ''
+    result = row[0] if row else ''
+    print(f"DEBUG: get_user_name result = '{result}'")
+    return result
 
 # --- Получение актуальных списков ---
 def get_pay_types():
@@ -359,16 +405,11 @@ async def start(msg: types.Message, state: FSMContext):
 async def process_type(call: types.CallbackQuery, state: FSMContext):
     t = 'Kirim' if call.data == 'type_kirim' else 'Ciqim'
     await state.update_data(type=t)
-    await call.message.edit_text("<b>Xarajat yoki daromad nomini yozing</b>")
-    await Form.nomi.set()
+    await call.message.edit_text("<b>Kotegoriyani tanlang:</b>", reply_markup=get_categories_kb())
+    await Form.category.set()
     await call.answer()
 
-# Nomi (обязательное поле)
-@dp.message_handler(state=Form.nomi, content_types=types.ContentTypes.TEXT)
-async def process_nomi(msg: types.Message, state: FSMContext):
-    await state.update_data(nomi=msg.text)
-    await msg.answer("<b>Kotegoriyani tanlang:</b>", reply_markup=get_categories_kb())
-    await Form.category.set()
+
 
 # Категория
 @dp.callback_query_handler(lambda c: c.data.startswith('cat_'), state=Form.category)
@@ -396,8 +437,23 @@ async def process_loyiha(call: types.CallbackQuery, state: FSMContext):
         await state.update_data(loyiha_manual=True)
     else:
         await state.update_data(loyiha=loyiha, loyiha_manual=False)
-        await call.message.edit_text("<b>Summani kiriting:</b>")
-        await Form.amount.set()
+        # Добавляем выбор валюты
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton('💵 Dollar', callback_data='currency_dollar'),
+            InlineKeyboardButton('💸 Sum', callback_data='currency_sum')
+        )
+        await call.message.edit_text("<b>Valyutani tanlang:</b>", reply_markup=kb)
+        await Form.currency.set()
+        await call.answer()
+
+# Обработка выбора валюты
+@dp.callback_query_handler(lambda c: c.data.startswith('currency_'), state=Form.currency)
+async def process_currency(call: types.CallbackQuery, state: FSMContext):
+    currency = 'Dollar' if call.data == 'currency_dollar' else 'Sum'
+    await state.update_data(currency=currency)
+    await call.message.edit_text("<b>Summani kiriting:</b>")
+    await Form.amount.set()
     await call.answer()
 
 # Обработка ручного ввода Loyihalar
@@ -406,8 +462,14 @@ async def process_loyiha_manual(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     if data.get('loyiha_manual'):
         await state.update_data(loyiha=msg.text.strip(), loyiha_manual=False)
-        await msg.answer("<b>Summani kiriting:</b>")
-        await Form.amount.set()
+        # Добавляем выбор валюты
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton('💵 Dollar', callback_data='currency_dollar'),
+            InlineKeyboardButton('💸 Sum', callback_data='currency_sum')
+        )
+        await msg.answer("<b>Valyutani tanlang:</b>", reply_markup=kb)
+        await Form.currency.set()
 
 # Сумма
 @dp.message_handler(lambda m: m.text.replace('.', '', 1).isdigit(), state=Form.amount)
@@ -462,10 +524,11 @@ async def process_confirm(call: types.CallbackQuery, state: FSMContext):
         from datetime import datetime
         dt = datetime.now()
         import platform
+        # Формат даты: 7/30/2025
         if platform.system() == 'Windows':
-            date_str = dt.strftime('%m/%d/%Y')
+            date_str = dt.strftime('%-m/%-d/%Y')  # Убираем ведущие нули
         else:
-            date_str = dt.strftime('%-m/%-d/%Y')
+            date_str = dt.strftime('%-m/%-d/%Y')  # Убираем ведущие нули
         time_str = dt.strftime('%H:%M')
         data['dt_for_sheet'] = date_str
         data['vaqt'] = time_str
@@ -681,6 +744,62 @@ async def edit_category_save(msg: types.Message, state: FSMContext):
     conn.close()
     await msg.answer(f'✏️ Kategoriya o‘zgartirildi: {old_name} → {new_name}')
     await state.finish()
+
+@dp.message_handler(commands=['debug_db'], state='*')
+async def debug_db_cmd(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer('Faqat admin uchun!')
+        return
+    await state.finish()
+    
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        
+        # Проверяем таблицу users
+        c.execute("SELECT COUNT(*) FROM users")
+        users_count = c.fetchone()[0]
+        
+        c.execute("SELECT user_id, name, phone, status, reg_date FROM users ORDER BY id DESC LIMIT 5")
+        recent_users = c.fetchall()
+        
+        conn.close()
+        
+        text = f"<b>База данных:</b>\n"
+        text += f"Всего пользователей: {users_count}\n\n"
+        text += f"<b>Последние 5 пользователей:</b>\n"
+        
+        if recent_users:
+            for i, (user_id, name, phone, status, reg_date) in enumerate(recent_users, 1):
+                text += f"{i}. ID: {user_id}, Имя: {name}, Статус: {status}\n"
+        else:
+            text += "Пользователей нет\n"
+            
+        await msg.answer(text)
+        
+    except Exception as e:
+        await msg.answer(f"❌ Ошибка при проверке БД: {e}")
+
+@dp.message_handler(commands=['test_user'], state='*')
+async def test_user_cmd(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer('Faqat admin uchun!')
+        return
+    await state.finish()
+    
+    user_id = msg.from_user.id
+    user_name = get_user_name(user_id)
+    
+    text = f"<b>Тест функции get_user_name:</b>\n"
+    text += f"Ваш user_id: {user_id}\n"
+    text += f"Результат get_user_name: '{user_name}'\n"
+    
+    if user_name:
+        text += "✅ Имя пользователя найдено в базе"
+    else:
+        text += "❌ Имя пользователя НЕ найдено в базе"
+    
+    await msg.answer(text)
 
 @dp.message_handler(commands=['userslist'], state='*')
 async def users_list_cmd(msg: types.Message, state: FSMContext):
