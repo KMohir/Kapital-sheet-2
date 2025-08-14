@@ -73,9 +73,8 @@ def get_categories_kb():
     kb = InlineKeyboardMarkup(row_width=2)
     for name in get_categories():
         cb = f"cat_{name}"
-        # Показываем эмодзи в меню
-        btn_text = get_category_with_emoji(name)
-        kb.add(InlineKeyboardButton(btn_text, callback_data=cb))
+        # Просто показываем название категории без эмодзи
+        kb.add(InlineKeyboardButton(name, callback_data=cb))
     return kb
 
 # Тип оплаты
@@ -166,14 +165,14 @@ def add_to_google_sheet(data):
 def format_summary(data):
     tur_emoji = '🟢' if data.get('type') == 'Kirim' else '🔴'
     dt = data.get('dt', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-    # Показываем категорию с эмодзи
-    category_with_emoji = get_category_with_emoji(data.get('category', '-'))
+    # Показываем категорию без эмодзи
+    category_name = data.get('category', '-')
     currency = data.get('currency', 'Sum')
     currency_symbol = '💵' if currency == 'Dollar' else '💸'
     return (
         f"<b>Natija:</b>\n"
         f"<b>Tur:</b> {tur_emoji} {data.get('type', '-')}\n"
-        f"<b>Kotegoriya:</b> {category_with_emoji}\n"
+        f"<b>Kotegoriya:</b> {category_name}\n"
         f"<b>Loyiha:</b> {data.get('loyiha', '-')}\n"
         f"<b>Valyuta:</b> {currency_symbol} {currency}\n"
         f"<b>Summa:</b> {data.get('amount', '-')}\n"
@@ -212,8 +211,7 @@ def init_db():
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE,
-        emoji TEXT
+        name TEXT UNIQUE
     )''')
     # Заполняем дефолтные значения, если таблицы пусты
     c.execute('SELECT COUNT(*) FROM pay_types')
@@ -223,7 +221,7 @@ def init_db():
     c.execute('SELECT COUNT(*) FROM categories')
     if c.fetchone()[0] == 0:
         for name in ["🟥 Doimiy Xarajat", "🟩 Oʻzgaruvchan Xarajat", "🟪 Qarz", "⚪ Avtoprom", "🟩 Divident", "🟪 Soliq", "🟦 Ish Xaqi"]:
-            c.execute('INSERT INTO categories (name, emoji) VALUES (%s, %s)', (name, "")) # Добавляем пустой emoji по умолчанию
+            c.execute('INSERT INTO categories (name) VALUES (%s)', (name,))
     conn.commit()
     conn.close()
 
@@ -303,8 +301,8 @@ def get_pay_types():
 def get_categories():
     conn = get_db_conn()
     c = conn.cursor()
-    c.execute('SELECT name, emoji FROM categories')
-    result = [(row[1] or '', row[0]) for row in c.fetchall()]
+    c.execute('SELECT name FROM categories')
+    result = [row[0] for row in c.fetchall()]
     conn.close()
     return result
 
@@ -800,6 +798,38 @@ async def test_user_cmd(msg: types.Message, state: FSMContext):
         text += "❌ Имя пользователя НЕ найдено в базе"
     
     await msg.answer(text)
+
+@dp.message_handler(commands=['recreate_db'], state='*')
+async def recreate_db_cmd(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer('Faqat admin uchun!')
+        return
+    await state.finish()
+    
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        
+        # Удаляем старую таблицу categories
+        c.execute('DROP TABLE IF EXISTS categories')
+        
+        # Создаем новую таблицу categories без столбца emoji
+        c.execute('''CREATE TABLE categories (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE
+        )''')
+        
+        # Заполняем дефолтными значениями
+        for name in ["🟥 Doimiy Xarajat", "🟩 Oʻzgaruvchan Xarajat", "🟪 Qarz", "⚪ Avtoprom", "🟩 Divident", "🟪 Soliq", "🟦 Ish Xaqi"]:
+            c.execute('INSERT INTO categories (name) VALUES (%s)', (name,))
+        
+        conn.commit()
+        conn.close()
+        
+        await msg.answer('✅ База данных пересоздана! Таблица categories обновлена.')
+        
+    except Exception as e:
+        await msg.answer(f'❌ Ошибка при пересоздании БД: {e}')
 
 @dp.message_handler(commands=['userslist'], state='*')
 async def users_list_cmd(msg: types.Message, state: FSMContext):
