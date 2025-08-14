@@ -1077,6 +1077,7 @@ async def approve_user_cb(call: types.CallbackQuery):
 async def set_user_commands(dp):
     commands = [
         types.BotCommand("start", "Botni boshlash"),
+        types.BotCommand("reboot", "Qayta boshlash - FSM ni to'xtatish"),
         # Здесь можно добавить другие публичные команды
     ]
     await dp.bot.set_my_commands(commands)
