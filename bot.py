@@ -831,6 +831,101 @@ async def recreate_db_cmd(msg: types.Message, state: FSMContext):
     except Exception as e:
         await msg.answer(f'❌ Ошибка при пересоздании БД: {e}')
 
+@dp.message_handler(commands=['sync_categories'], state='*')
+async def sync_categories_cmd(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer('Faqat admin uchun!')
+        return
+    await state.finish()
+    
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        
+        # Очищаем таблицу categories
+        c.execute('DELETE FROM categories')
+        
+        # Добавляем актуальные категории
+        categories = [
+            "🟥 Doimiy Xarajat",
+            "🟩 Oʻzgaruvchan Xarajat", 
+            "🟪 Qarz",
+            "⚪ Avtoprom",
+            "🟩 Divident",
+            "🟪 Soliq",
+            "🟦 Ish Xaqi"
+        ]
+        
+        for name in categories:
+            c.execute('INSERT INTO categories (name) VALUES (%s)', (name,))
+        
+        conn.commit()
+        conn.close()
+        
+        await msg.answer('✅ Категории синхронизированы!')
+        
+    except Exception as e:
+        await msg.answer(f'❌ Ошибка при синхронизации: {e}')
+
+@dp.message_handler(commands=['show_categories'], state='*')
+async def show_categories_cmd(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer('Faqat admin uchun!')
+        return
+    await state.finish()
+    
+    try:
+        conn = get_db_conn()
+        c = conn.cursor()
+        
+        c.execute('SELECT name FROM categories ORDER BY id')
+        categories = c.fetchall()
+        conn.close()
+        
+        if categories:
+            text = '<b>Текущие категории в базе данных:</b>\n\n'
+            for i, (name,) in enumerate(categories, 1):
+                text += f"{i}. {name}\n"
+        else:
+            text = '❌ Категории не найдены в базе данных'
+        
+        await msg.answer(text)
+        
+    except Exception as e:
+        await msg.answer(f'❌ Ошибка при получении категорий: {e}')
+
+@dp.message_handler(commands=['load_categories_from_file'], state='*')
+async def load_categories_from_file_cmd(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in ADMINS:
+        await msg.answer('Faqat admin uchun!')
+        return
+    await state.finish()
+    
+    try:
+        # Читаем категории из файла
+        with open('categories.txt', 'r', encoding='utf-8') as f:
+            categories = [line.strip() for line in f if line.strip()]
+        
+        conn = get_db_conn()
+        c = conn.cursor()
+        
+        # Очищаем таблицу categories
+        c.execute('DELETE FROM categories')
+        
+        # Добавляем категории из файла
+        for name in categories:
+            c.execute('INSERT INTO categories (name) VALUES (%s)', (name,))
+        
+        conn.commit()
+        conn.close()
+        
+        await msg.answer(f'✅ Загружено {len(categories)} категорий из файла categories.txt')
+        
+    except FileNotFoundError:
+        await msg.answer('❌ Файл categories.txt не найден')
+    except Exception as e:
+        await msg.answer(f'❌ Ошибка при загрузке категорий: {e}')
+
 @dp.message_handler(commands=['userslist'], state='*')
 async def users_list_cmd(msg: types.Message, state: FSMContext):
     if msg.from_user.id not in ADMINS:
