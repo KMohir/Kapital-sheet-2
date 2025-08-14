@@ -30,7 +30,6 @@ dp = Dispatcher(bot, storage=MemoryStorage())
 class Form(StatesGroup):
     type = State()  # Kirim/Ciqim
     category = State()
-    loyiha = State()  # Новый шаг
     currency = State()  # Выбор валюты
     amount = State()
     pay_type = State()
@@ -192,7 +191,7 @@ def add_to_google_sheet(data):
             clean_emoji(data.get('type', '')), # Kirim-Chiqim (E)
             data.get('pay_type', ''),         # To'lov turi (F)
             clean_emoji(data.get('category', '')), # Kotegoriyalar (G)
-            data.get('loyiha', ''),           # Loyihalar (H)
+            '',                               # Loyihalar (H) - пусто
             data.get('comment', ''),          # Izoh (I)
             '',                               # Oylik ko'rsatkich (J) - пусто
             user_name                         # User (K) - имя пользователя
@@ -200,9 +199,27 @@ def add_to_google_sheet(data):
         print(f"DEBUG: Row data: {row}")
         worksheet.append_row(row)
         print(f"✅ Данные успешно записаны в Google Sheets")
+        
+        # Получаем остатки из первой строки
+        try:
+            # Читаем значения из первой строки (C1 и D1)
+            dollar_balance = worksheet.acell('C1').value or '0'
+            sum_balance = worksheet.acell('D1').value or '0'
+            
+            # Форматируем остатки
+            balance_text = f"💰 <b>Остатки:</b>\n"
+            balance_text += f"💵 <b>Доллары:</b> {dollar_balance}\n"
+            balance_text += f"💸 <b>Суммы:</b> {sum_balance}"
+            
+            return balance_text
+        except Exception as e:
+            print(f"❌ Ошибка при получении остатков: {e}")
+            return None
+            
     except Exception as e:
         print(f"❌ Ошибка при записи в Google Sheets: {e}")
         # Можно добавить логирование ошибки
+        return None
 
 def format_summary(data):
     tur_emoji = '🟢' if data.get('type') == 'Kirim' else '🔴'
@@ -215,7 +232,6 @@ def format_summary(data):
         f"<b>Natija:</b>\n"
         f"<b>Tur:</b> {tur_emoji} {data.get('type', '-')}\n"
         f"<b>Kotegoriya:</b> {category_name}\n"
-        f"<b>Loyiha:</b> {data.get('loyiha', '-')}\n"
         f"<b>Valyuta:</b> {currency_symbol} {currency}\n"
         f"<b>Summa:</b> {data.get('amount', '-')}\n"
         f"<b>To'lov turi:</b> {data.get('pay_type', '-')}\n"
@@ -456,36 +472,15 @@ async def process_type(call: types.CallbackQuery, state: FSMContext):
 async def process_category(call: types.CallbackQuery, state: FSMContext):
     cat = call.data[4:]
     await state.update_data(category=cat)
-    # Шаг выбора Loyihalar
+    # Сразу переходим к выбору валюты
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton('UzAvtosanoat', callback_data='loyiha_UzAvtosanoat'),
-        InlineKeyboardButton('Bodomzor', callback_data='loyiha_Bodomzor'),
-        InlineKeyboardButton('Boshqa', callback_data='loyiha_Boshqa')
+        InlineKeyboardButton('💵 Dollar', callback_data='currency_dollar'),
+        InlineKeyboardButton('💸 Sum', callback_data='currency_sum')
     )
-    await call.message.edit_text("<b>Loyihani tanlang:</b>", reply_markup=kb)
-    await Form.loyiha.set()
+    await call.message.edit_text("<b>Valyutani tanlang:</b>", reply_markup=kb)
+    await Form.currency.set()
     await call.answer()
-
-# Обработка выбора Loyihalar
-@dp.callback_query_handler(lambda c: c.data.startswith('loyiha_'), state=Form.loyiha)
-async def process_loyiha(call: types.CallbackQuery, state: FSMContext):
-    loyiha = call.data[7:]
-    if loyiha == 'Boshqa':
-        await call.message.edit_text("<b>Loyiha nomini yozing:</b>")
-        await Form.loyiha.set()
-        await state.update_data(loyiha_manual=True)
-    else:
-        await state.update_data(loyiha=loyiha, loyiha_manual=False)
-        # Добавляем выбор валюты
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton('💵 Dollar', callback_data='currency_dollar'),
-            InlineKeyboardButton('💸 Sum', callback_data='currency_sum')
-        )
-        await call.message.edit_text("<b>Valyutani tanlang:</b>", reply_markup=kb)
-        await Form.currency.set()
-        await call.answer()
 
 # Обработка выбора валюты
 @dp.callback_query_handler(lambda c: c.data.startswith('currency_'), state=Form.currency)
@@ -495,21 +490,6 @@ async def process_currency(call: types.CallbackQuery, state: FSMContext):
     await call.message.edit_text("<b>Summani kiriting:</b>")
     await Form.amount.set()
     await call.answer()
-
-# Обработка ручного ввода Loyihalar
-@dp.message_handler(state=Form.loyiha, content_types=types.ContentTypes.TEXT)
-async def process_loyiha_manual(msg: types.Message, state: FSMContext):
-    data = await state.get_data()
-    if data.get('loyiha_manual'):
-        await state.update_data(loyiha=msg.text.strip(), loyiha_manual=False)
-        # Добавляем выбор валюты
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton('💵 Dollar', callback_data='currency_dollar'),
-            InlineKeyboardButton('💸 Sum', callback_data='currency_sum')
-        )
-        await msg.answer("<b>Valyutani tanlang:</b>", reply_markup=kb)
-        await Form.currency.set()
 
 # Сумма
 @dp.message_handler(lambda m: m.text.replace('.', '', 1).isdigit(), state=Form.amount)
@@ -575,8 +555,12 @@ async def process_confirm(call: types.CallbackQuery, state: FSMContext):
         # Гарантируем, что user_id всегда есть
         data['user_id'] = call.from_user.id
         try:
-            add_to_google_sheet(data)
+            balance_text = add_to_google_sheet(data)
             await call.message.answer('✅ Данные успешно отправлены в Google Sheets!')
+            
+            # Отправляем остатки пользователю
+            if balance_text:
+                await call.message.answer(balance_text)
 
             # Уведомление для админов
             user_name = get_user_name(call.from_user.id) or call.from_user.full_name
@@ -988,6 +972,18 @@ async def load_categories_from_file_cmd(msg: types.Message, state: FSMContext):
         await msg.answer('❌ Файл categories.txt не найден')
     except Exception as e:
         await msg.answer(f'❌ Ошибка при загрузке категорий: {e}')
+
+@dp.message_handler(commands=['reboot'], state='*')
+async def reboot_cmd(msg: types.Message, state: FSMContext):
+    await state.finish()  # Останавливаем FSM состояние
+    text = "<b>Qaysi turdagi operatsiya?</b>"
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton('🟢 Kirim', callback_data='type_kirim'),
+        InlineKeyboardButton('🔴 Chiqim', callback_data='type_chiqim')
+    )
+    await msg.answer(text, reply_markup=kb)
+    await Form.type.set()
 
 @dp.message_handler(commands=['userslist'], state='*')
 async def users_list_cmd(msg: types.Message, state: FSMContext):
