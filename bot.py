@@ -567,6 +567,10 @@ async def process_confirm(call: types.CallbackQuery, state: FSMContext):
             summary_text = format_summary(data)
             admin_notification_text = f"Foydalanuvchi <b>{user_name}</b> tomonidan kiritilgan yangi ma'lumot:\n\n{summary_text}"
             
+            # Добавляем остатки к уведомлению админа
+            if balance_text:
+                admin_notification_text += f"\n\n{balance_text}"
+            
             for admin_id in ADMINS:
                 try:
                     await bot.send_message(admin_id, admin_notification_text)
